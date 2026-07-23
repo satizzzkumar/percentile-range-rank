@@ -1,4 +1,24 @@
 //@version=5
+//=============================================================================
+// Percentile Range Rank
+// Author: Sathish Kumar
+//
+// Description:
+// This indicator calculates percentile-based width rankings for CPR,
+// Camarilla, and R1/S1 levels using a 30-day historical lookback.
+//
+// Features:
+// - CPR width percentage ranking
+// - Camarilla width ranking
+// - R1/S1 width ranking
+// - First 5-minute range as a percentage of yesterday's ATR 
+// - Visual CPR zone and R1/S1 plotting
+//
+// Use case:
+// Helps evaluate whether the session structure is relatively narrow,
+// normal, or wide for intraday context.
+//=============================================================================
+
 indicator("Percentile Range Rank", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
 
 // ==============================================================================
