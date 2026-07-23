@@ -1,0 +1,214 @@
+//@version=5
+indicator("Percentile Range Rank", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ==============================================================================
+// PART 1: ORIGINAL LOGIC (Lines & Current Day Values)
+// ==============================================================================
+
+currentDay = time("D")
+isNewDay = ta.change(currentDay) != 0
+
+prevDayHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+prevDayLow = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+prevDayClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_on)
+
+// Calculate SMA-based ATR (14-day) from yesterday
+trueRange = ta.tr
+yesterdayATR = request.security(syminfo.tickerid, "D", ta.sma(ta.tr, 14)[1], lookahead=barmerge.lookahead_on)
+
+// Frank Ochoa CPR Formulas
+pivot = (prevDayHigh + prevDayLow + prevDayClose) / 3
+bc = (prevDayHigh + prevDayLow) / 2
+tc = (pivot - bc) + pivot
+
+// Standard Floor Pivot R1 and S1 Calculations
+r1 = (2 * pivot) - prevDayLow
+s1 = (2 * pivot) - prevDayHigh
+
+// Width % Calculations
+currentWidth = math.abs(tc - bc)
+currentWidthPct = (currentWidth / pivot) * 100
+
+currentR1S1Width = math.abs(r1 - s1)
+currentR1S1WidthPct = (currentR1S1Width / pivot) * 100
+
+// Camarilla Width
+rangeVal = prevDayHigh - prevDayLow
+h3 = prevDayClose + (rangeVal * 1.1 / 4)
+l3 = prevDayClose - (rangeVal * 1.1 / 4)
+camWidth = h3 - l3
+currentCamWidthPct = (camWidth / prevDayClose) * 100
+
+// ==============================================================================
+// PART 2: HISTORICAL RANKING (CPR, Cam & R1S1)
+// ==============================================================================
+
+calc_rank_stats() =>
+    dHigh  = high[1]
+    dLow   = low[1]
+    dClose = close[1]
+    
+    // CPR Stats
+    dPivot = (dHigh + dLow + dClose) / 3
+    dBC    = (dHigh + dLow) / 2
+    dTC    = (dPivot - dBC) + dPivot
+    dWidth = math.abs(dTC - dBC)
+    dWidthPct = (dWidth / dPivot) * 100
+    
+    dRank = ta.percentrank(dWidthPct, 30)
+    p20 = ta.percentile_linear_interpolation(dWidthPct, 30, 20)
+    p40 = ta.percentile_linear_interpolation(dWidthPct, 30, 40)
+    p60 = ta.percentile_linear_interpolation(dWidthPct, 30, 60)
+    
+    // R1/S1 Stats
+    dR1 = (2 * dPivot) - dLow
+    dS1 = (2 * dPivot) - dHigh
+    dR1S1Width = math.abs(dR1 - dS1)
+    dR1S1Pct = (dR1S1Width / dPivot) * 100
+
+    rRank = ta.percentrank(dR1S1Pct, 30)
+    r20 = ta.percentile_linear_interpolation(dR1S1Pct, 30, 20)
+    r40 = ta.percentile_linear_interpolation(dR1S1Pct, 30, 40)
+    r60 = ta.percentile_linear_interpolation(dR1S1Pct, 30, 60)
+
+    // Camarilla Stats
+    dRange = dHigh - dLow
+    dH3 = dClose + (dRange * 1.1 / 4)
+    dL3 = dClose - (dRange * 1.1 / 4)
+    dCamWidth = dH3 - dL3
+    dCamPct = (dCamWidth / dClose) * 100
+    
+    camRank = ta.percentrank(dCamPct, 30)
+    c20 = ta.percentile_linear_interpolation(dCamPct, 30, 20)
+    c40 = ta.percentile_linear_interpolation(dCamPct, 30, 40)
+    c60 = ta.percentile_linear_interpolation(dCamPct, 30, 60)
+    
+    [dRank, p20, p40, p60, camRank, c20, c40, c60, rRank, r20, r40, r60]
+
+// Fetch Ranks & Thresholds (Extended for R1S1)
+[todayRank, val20, val40, val60, todayCamRank, camVal20, camVal40, camVal60, todayR1S1Rank, r1s1Val20, r1s1Val40, r1s1Val60] = request.security(syminfo.tickerid, "D", calc_rank_stats(), lookahead=barmerge.lookahead_on)
+
+// Determine Bands
+string currentBand = "NA"
+if not na(todayRank)
+    if todayRank <= 20
+        currentBand := "E.Narrow" 
+    else if todayRank <= 40
+        currentBand := "Narrow"   
+    else if todayRank <= 60
+        currentBand := "Normal"   
+    else
+        currentBand := "Wide"
+
+string camBand = "NA"
+if not na(todayCamRank)
+    if todayCamRank <= 20
+        camBand := "E.Narrow" 
+    else if todayCamRank <= 40
+        camBand := "Narrow"   
+    else if todayCamRank <= 60
+        camBand := "Normal"   
+    else
+        camBand := "Wide"
+
+string r1s1Band = "NA"
+if not na(todayR1S1Rank)
+    if todayR1S1Rank <= 20
+        r1s1Band := "E.Narrow" 
+    else if todayR1S1Rank <= 40
+        r1s1Band := "Narrow"   
+    else if todayR1S1Rank <= 60
+        r1s1Band := "Normal"   
+    else
+        r1s1Band := "Wide"
+
+// Format Strings
+strCPRBands = "CPR_RB : E.N < " + str.tostring(val20, "#.##") + "% | N < " + str.tostring(val40, "#.##") + "% | Nm < " + str.tostring(val60, "#.##") + "%"
+strCPRStatus = "T.CPR_W : " + str.tostring(currentWidthPct, "#.##") + "% - " + currentBand
+
+strCamBands = "CAM_RB : E.N < " + str.tostring(camVal20, "#.##") + "% | N < " + str.tostring(camVal40, "#.##") + "% | Nm < " + str.tostring(camVal60, "#.##") + "%"
+strCamStatus = "T.CAM_W : " + str.tostring(currentCamWidthPct, "#.##") + "% - " + camBand
+
+strR1S1Bands = "R1S1_RB : E.N < " + str.tostring(r1s1Val20, "#.##") + "% | N < " + str.tostring(r1s1Val40, "#.##") + "% | Nm < " + str.tostring(r1s1Val60, "#.##") + "%"
+strR1S1Status = "T.R1S1_W : " + str.tostring(currentR1S1WidthPct, "#.##") + "% - " + r1s1Band
+
+// ==============================================================================
+// PART 3: DRAWING & LABELS 
+// ==============================================================================
+
+var int dayStart = na
+var float currentTC = na
+var float currentPivot = na
+var float currentBC = na
+var float currentR1 = na
+var float currentS1 = na
+var float first5MinHigh = na
+var float first5MinLow = na
+var bool captured5Min = false
+var float dayATR = na 
+var label currentLabel = na 
+
+if isNewDay
+    if not na(dayStart) and bar_index > dayStart
+        // Draw previous day's CPR
+        line.new(dayStart, currentTC, bar_index - 1, currentTC, color=color.black, width=1)
+        line.new(dayStart, currentPivot, bar_index - 1, currentPivot, color=color.black, width=1)
+        line.new(dayStart, currentBC, bar_index - 1, currentBC, color=color.black, width=1)
+        box.new(dayStart, currentTC, bar_index - 1, currentBC, bgcolor=color.new(color.gray, 85), border_color=color.new(color.gray, 100))
+        
+        // Draw previous day's R1 and S1 (Dashed Lines)
+        line.new(dayStart, currentR1, bar_index - 1, currentR1, color=color.new(color.green, 30), width=3, style=line.style_dotted)
+        line.new(dayStart, currentS1, bar_index - 1, currentS1, color=color.new(color.red, 30), width=3, style=line.style_dotted)
+    
+    dayStart := bar_index
+    currentTC := tc
+    currentPivot := pivot
+    currentBC := bc
+    currentR1 := r1
+    currentS1 := s1
+    
+    dayATR := yesterdayATR
+    
+    first5MinHigh := high
+    first5MinLow := low
+    captured5Min := false
+    
+    labelText = strCPRBands + "\n" + strCPRStatus + "\n" + strCamBands + "\n" + strCamStatus + "\n" + strR1S1Bands + "\n" + strR1S1Status
+    currentLabel := label.new(bar_index, low, 
+              text=labelText, 
+              style=label.style_label_up, 
+              color=color.new(color.blue, 20), 
+              textcolor=color.white, 
+              size=size.small)
+
+else
+    if not captured5Min and not na(dayStart)
+        timeElapsed = (bar_index - dayStart) * timeframe.multiplier
+        if timeElapsed < 5 
+            first5MinHigh := math.max(first5MinHigh, high)
+            first5MinLow := math.min(first5MinLow, low)
+        else
+            captured5Min := true
+            first5MinRange = first5MinHigh - first5MinLow
+            atrPercent = (first5MinRange / dayATR) * 100
+            
+            labelText = strCPRBands + "\n" + strCPRStatus + "\n" + strCamBands + "\n" + strCamStatus + "\n" + strR1S1Bands + "\n" + strR1S1Status + "\n" + "5M ATR% : " + str.tostring(atrPercent, "#.##") + "%"
+            label.set_text(currentLabel, labelText)
+
+if barstate.islast and not na(dayStart)
+    // Draw Current Day's CPR
+    line.new(dayStart, currentTC, bar_index, currentTC, color=color.black, width=1, extend=extend.none)
+    line.new(dayStart, currentPivot, bar_index, currentPivot, color=color.black, width=1, extend=extend.none)
+    line.new(dayStart, currentBC, bar_index, currentBC, color=color.black, width=1, extend=extend.none)
+    box.new(dayStart, currentTC, bar_index, currentBC, bgcolor=color.new(color.gray, 85), border_color=color.new(color.gray, 100), extend=extend.none)
+    
+    // Draw Current Day's R1 and S1 (Dashed Lines)
+    line.new(dayStart, currentR1, bar_index, currentR1, color=color.new(color.green, 30), width=3, style=line.style_dotted, extend=extend.none)
+    line.new(dayStart, currentS1, bar_index, currentS1, color=color.new(color.red, 30), width=3, style=line.style_dotted, extend=extend.none)
+
+// Plot invisible values (For Price Scale Display)
+plot(currentTC, title="TC", color=color.new(color.black, 100), linewidth=1, display=display.price_scale)
+plot(currentPivot, title="PP", color=color.new(color.black, 100), linewidth=1, display=display.price_scale)
+plot(currentBC, title="BC", color=color.new(color.black, 100), linewidth=1, display=display.price_scale)
+plot(currentR1, title="R1", color=color.new(color.green, 100), linewidth=2, display=display.price_scale)
+plot(currentS1, title="S1", color=color.new(color.red, 100), linewidth=2, display=display.price_scale)
